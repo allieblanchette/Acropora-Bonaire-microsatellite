@@ -2,14 +2,14 @@
 # MICROSATELLITE ALLELE DATA ANALYSES
 # Purpose: analyzing (pre-cleaned/pre-wrangled) microsatellite data of Acropora cervicornis and Acropora palmata from Reef Renewal Bonaire's gene bank
 # Data: Cleaned Acropora palmata and Acropora cervicornis microsatellite allele tables from Reef Renewal Bonaire's gene bank
-# Last updated on: 2026 February 27
+# Last updated on: 2026 September 18
 # Last updated by: Allie Blanchette
-# NOTE - in this script, each analysis is written out once, and you change whether you are analyzing the A. palmata or A. cervicornis data using "set_coral <- " 
+# NOTE - often in this script, each analysis is written out once, and you change whether you are analyzing the A. palmata or A. cervicornis data using "set_coral <- " at the beginning of the analysis
 ########################################################################################################################################################################################################################################################################################################################################################################
 
 ##### Publication citation:
-# Title: Genetic diversity and connectivity of endangered Acropora spp. corals in Bonaire, Caribbean Netherlands: implications for restoration and gene banking
-# Authors: Allison Blanchette, Francesca Virdis, Sanne Tuijten, Pearl Rivers Key, Don Levitan, Sarah E. Lester, Andrew Rassweiler
+# Title: Genetic diversity of endangered Acropora spp. corals in Bonaire, Caribbean Netherlands: implications for restoration and gene banking
+# Authors: Allison Blanchette, Francesca Virdis, Sanne H. Tuijten, Pearl R. Rivers Key, Don R. Levitan, Sarah E. Lester, Andrew Rassweiler
 
 
 
@@ -29,6 +29,7 @@ library(adegenet)     # find.clusters()
 library(poppr)        # for bulk of population genetics analyses
 # library(pegas)      # for determining if the populations are in Hardy-Weinberg equilibrium using the function hw.test(). Masks mst and amova from poppr so only use as needed
 library(genepop)      # for test_LD() and nulls()
+library(mmod)         # for F-statistics (fixation, differentation)
 library(vegan)        # for Mantel test 
 library(related)      # for coancestry()
 library(iNEXT)        # for rarefaction at species level
@@ -64,15 +65,15 @@ library(viridis)    # for colorblind-friendly palettes
 
 ##### set working directory
 #setwd("C:\\Users\\rassweiler\\Documents\\PhD Research!\\Bonaire\\Data files\\Genetics\\Fragment Analysis Data!\\Allele Tables\\For analysis")
-setwd("C:\\Users\\rassweiler\\Documents\\Publishing\\Ch1_Microsatellites RRB Acropora\\Final code and data\\Github\\Data analyses")
+setwd("C:\\Users\\rassweiler\\Documents\\Publishing\\Ch1_Microsatellites RRB Acropora\\Final code and data\\Github upload")
 #setwd("D:\\Science\\Allie")
 
 
 ##### Load in data
 # make row names the lineage ID (first column in csv)
-Apal_wG32_df <- read.csv("Apal32_251209.csv", row.names = 1)         
-Acer_triploid_df <- read.csv("Acer_Triploid_formatted_251209.csv", row.names = 1)
-Acer_df <- read.csv("Acer_251209.csv", row.names = 1)
+Apal_wG32_df <- read.csv("Allele tables\\Apal32_251209.csv", row.names = 1)         
+Acer_triploid_df <- read.csv("Allele tables\\Acer_Triploid_formatted_251209.csv", row.names = 1)
+Acer_df <- read.csv("Allele tables\\Acer_251209.csv", row.names = 1)
 
 
 ##### Create genind objects! 
@@ -129,7 +130,7 @@ locNames(geneious_genind)
 ##### load in subpopulation geographic data and assign to genind
 
 # Acropora palmata
-Subpop_centroids_AP <- read.csv("Subpops_centroids.csv") %>% 
+Subpop_centroids_AP <- read.csv("Other data for R\\Subpops_centroids.csv") %>% 
     filter(Species == "AP") %>% 
     dplyr::select(-Species) 
 
@@ -141,7 +142,7 @@ Apal_g0_f0@other$xy <- Subpop_centroids_AP
 
 
 # Acropora cervicornis
-Subpop_centroids_AC <- read.csv("Subpops_centroids.csv") %>% 
+Subpop_centroids_AC <- read.csv("Other data for R\\Subpops_centroids.csv") %>% 
     filter(Species == "AC") %>% 
     dplyr::select(-Species) 
 
@@ -308,16 +309,79 @@ pop.order <- c("North", "Central", "South", "Klein", "Lac Bay")
 axis.title.sz = 12
 axis.txt.sz = 10
 leg.txt.sz = 8
-annotate.sz = 5
+annotate.sz = 3.25
 title.sz = 12
 panel.txt.sz = 13
 
 # Plot feature sizes
-point.sz = 3
+point.sz = 2
 regln.sz = 0.75
 
 
 
+
+####################################################################################################################################################################################
+## DMSO vs. DNA Shield comparison
+####################################################################################################################################################################################
+
+# Load in and clean qubit data for DNA concentrations, selecting for just the relevant data columns
+dna_concentrations_ME <- read_csv("C:\\Users\\rassweiler\\Documents\\PhD Research!\\Bonaire\\Genetics collections and lab work\\Protocols\\Protocol data\\3_Qubit_Data_ME.csv") %>% 
+  janitor::clean_names() %>%   # clean up column names
+  select(initials:replicate, concentration_1, concentration_2, sample_comments) %>%        # reduce data frame to just columns needed. Each sample was measured twice in a row. qubit_x_ng_ml data were the dilution concentrations of sample in fluorometer; concentration_x were the calculated concentration of original sample
+  mutate(species = recode(species, "AC" = "Acer"),
+         species = recode(species, "AP" = "Apal"))
+
+dna_concentrations_AB <- read_csv("C:\\Users\\rassweiler\\Documents\\PhD Research!\\Bonaire\\Genetics collections and lab work\\Protocols\\Protocol data\\3_Qubit_Data_AB.csv") %>% 
+  janitor::clean_names() %>% 
+  rename(sample_comments = individual_comments,
+         concentration_1 = qubit_reading_1_ug_m_l,
+         concentration_2 = qubit_reading_2_ug_m_l) %>% 
+  select(initials, date, sample_id, species, concentration_1, concentration_2, sample_comments)
+
+
+# Calculate summary stats for A. cervicornis in DMSO in initial 2022 sampling
+dna_concentrations_2022 <- dna_concentrations_AB %>% 
+  filter(species == "Acer") %>% 
+  mutate(concentration_1 = as.numeric(concentration_1),                                    # make concentration data numeric
+         concentration_2 = as.numeric(concentration_2),                                    # make concentration data numeric
+         concentration_1 = ifelse(is.na(concentration_1), 0, concentration_1),             # make NAs = 0 (cases where DNA was too low for qubit to read, ie 'Out of Range')
+         concentration_2 = ifelse(is.na(concentration_2), 0, concentration_2),             # make NAs = 0 (cases where DNA was too low for qubit to read, ie 'Out of Range')
+         concentration_mean_reading = (concentration_1 + concentration_2)/2) %>%           # and calculate average across 2 readings (note that AC_G04_BN_DM1 and AC_G05_BN_DM1 were too low/out of range)
+  filter(!(stringr::str_detect(sample_id, "E1|Zymo|Speedvac|SH|ST|LH|R2")))                # filter out any trial-type samples (trialing dna extraction methods)
+
+median(dna_concentrations_2022$concentration_mean_reading)
+mean(dna_concentrations_2022$concentration_mean_reading)
+min(dna_concentrations_2022$concentration_mean_reading)
+max(dna_concentrations_2022$concentration_mean_reading)
+
+
+# Calculate summary stats for identical samples (species-geno-tree all same) tested in each preservative in 2024 re-sampling
+preservative_comparison_full <- dna_concentrations_ME %>% 
+  filter(species == "Acer") %>%                                                            # only comparing DM/DS performance for Acropora cervicornis
+  filter(preservative %in% c("DM", "DS")) %>%                                              # reduce to just the samples that were intentionally used for comparison of preservative types
+  mutate(species_geno_tree = paste(species, geno, tree, sep = "_"),                        # make column combining species, geno, tree (for next filtering step)
+         concentration_1 = as.numeric(concentration_1),                                    # make concentration data numeric
+         concentration_2 = as.numeric(concentration_2),                                    # make concentration data numeric
+         concentration_1 = ifelse(is.na(concentration_1), 0, concentration_1),             # make NAs = 0 (cases where DNA was too low for qubit to read, ie 'Out of Range')
+         concentration_2 = ifelse(is.na(concentration_2), 0, concentration_2),             # make NAs = 0 (cases where DNA was too low for qubit to read, ie 'Out of Range')
+         concentration_mean_reading = (concentration_1 + concentration_2)/2) %>%           # and calculate average across 2 readings (note that AC_G04_BN_DM1 and AC_G05_BN_DM1 were too low/out of range)
+  group_by(species_geno_tree, species, geno, tree, preservative) %>%                      
+  summarise(concentration_mean_sample = mean(concentration_mean_reading, na.rm = T)) %>% 
+  group_by(species_geno_tree) %>%
+  filter(n() > 1) %>%                                                                      # remove any samples that did not have a matching partner for both preservative types (eg occurs only once in either DMSO or DNA Shield)
+  ungroup()
+
+preservative_comparison_summary <- preservative_comparison_full %>%   # calculate averages for each species_geno_tree per preservative (eg sometimes 3 replicates per species_geno_tree were run, all from DNA Shield)
+  group_by(preservative) %>% 
+  summarise(concentration_median = median(concentration_mean_sample),
+            concentration_mean = mean(concentration_mean_sample),                          # for the samples that were extracted from both preservative types, calculate mean DNA concentration and standard error for variation
+            sd = sd(concentration_mean_sample),
+            n = length(concentration_mean_sample)) %>% 
+  mutate(se = sd/sqrt(n))
+
+# Export preservative_comparison_full for supplement
+write.csv(preservative_comparison_full, "C:\\Users\\rassweiler\\Documents\\Publishing\\Ch1_Microsatellites RRB Acropora\\Supplement\\preservative_comparison_full.csv", row.names = F)
+  
 
 ####################################################################################################################################################################################
 ## Linkage Disequilibrium
@@ -992,11 +1056,11 @@ vignette("Introduction", package="iNEXT")
 # matrix, data.frame, or list
 # in data frame: rows = species (ie alleles), column = abundances
 
-Apal_g1_f1_inext <- read.csv("Apal_g1_f1_inext.csv") %>% 
+Apal_g1_f1_inext <- read.csv("Other data for R\\Apal_g1_f1_inext.csv") %>% 
   column_to_rownames(var = "unique_allele_ID") %>% 
   select(allele_abundance)
 
-Acer_g1_f1_inext <- read.csv("Acer_g1_f1_inext.csv") %>%
+Acer_g1_f1_inext <- read.csv("Other data for R\\Acer_g1_f1_inext.csv") %>%
   column_to_rownames(var = "unique_allele_ID") %>%
   select(allele_abundance)
 
@@ -1023,20 +1087,21 @@ sum(Acer_g1_f1_inext$allele_abundance)
 # set_coral <- Apal_g1_f1_inext
 # set_alleles <- 22   # number of alleles (diploid)
 # set_loci <- 11      # number of loci
-# set_coral_full <- 'Acropora palmata'
+# set_coral_annot <- 'Acropora palmata\nN = 11 loci'
+
 
 # Acropora cervicornis
 set_coral <- Acer_g1_f1_inext
 set_alleles <- 12  # number of alleles (diploid)
 set_loci <- 6      # number of loci
-set_coral_full <- 'Acropora cervicornis'
+set_coral_annot <- 'Acropora cervicornis\nN = 6 loci'
 
 
 # sensitivity test
 # set_coral <- sens_test_inext
 # set_alleles <- 20   # number of alleles (diploid)
 # set_loci <- 10      # number of loci
-# set_coral_full <- 'sensitivity test Apal 166'
+# set_coral_annot <- 'sensitivity test Apal 166'
 
 
 
@@ -1104,7 +1169,7 @@ ggiNEXT(output, type = 1, color.var = "Order.q", grey = T)+
                      name = "",
                      breaks = set_breaks_y)+         
   
-  # RE-scale x-axis: Number MLGs (divide by # number alleles documented per mlg = loci*2)
+  # Re-scale x-axis: Number MLGs (divide by # number alleles documented per mlg = loci*2)
   scale_x_continuous(labels = function(x) number_format(accuracy = 1)(x/set_alleles),
                      name = "",
                      breaks = set_breaks_x)+    
@@ -1114,32 +1179,32 @@ ggiNEXT(output, type = 1, color.var = "Order.q", grey = T)+
   theme_classic()+
   theme(legend.position = "none")+
   annotate("text", x= annot_x, y=annot_y, 
-           label = paste0("italic('", set_coral_full, "')"),
+           label = paste0("italic('", set_coral_annot, "')"),
            parse =TRUE)
 
 
 # IMPORTANT: save each panel separately. This is necessary because iNEXT was re-applying one species' re-scaling (eg set_breaks) to both plots, such that one panel always had incorrect axes
-ggsave("C:\\Users\\rassweiler\\Documents\\Publishing\\Ch1_Microsatellites RRB Acropora\\Figures\\fig2\\msats_fig2a.tiff", apal_inext_plot, dpi=600, units="cm", width = 8.5, height = 8.5)
-ggsave("C:\\Users\\rassweiler\\Documents\\Publishing\\Ch1_Microsatellites RRB Acropora\\Figures\\fig2\\msats_fig2b.tiff", acer_inext_plot, dpi=600, units="cm", width = 8.5, height = 8.5)
+#ggsave("C:\\Users\\rassweiler\\Documents\\Publishing\\Ch1_Microsatellites RRB Acropora\\Figures\\fig2\\msats_fig2a_wider.tiff", apal_inext_plot, dpi=600, units="cm", width = 8, height = 6)
+ggsave("C:\\Users\\rassweiler\\Documents\\Publishing\\Ch1_Microsatellites RRB Acropora\\Figures\\fig2\\msats_fig2b_wider.tiff", acer_inext_plot, dpi=600, units="cm", width = 8, height = 6)
 
 
 
 fig2<-
   ggdraw()+
-  draw_image("C:\\Users\\rassweiler\\Documents\\Publishing\\Ch1_Microsatellites RRB Acropora\\Figures\\fig2\\msats_fig2a.tiff",
-             x=0.025, y=.5, width=.45, height=.45)+
-  draw_image("C:\\Users\\rassweiler\\Documents\\Publishing\\Ch1_Microsatellites RRB Acropora\\Figures\\fig2\\msats_fig2b.tiff",
-             x=0.025, y=0.025, width=.45, height=.45)+
+  draw_image("C:\\Users\\rassweiler\\Documents\\Publishing\\Ch1_Microsatellites RRB Acropora\\Figures\\fig2\\msats_fig2a_wider.tiff",
+             x=-0.22, y=0.02, height=0.9)+
+  draw_image("C:\\Users\\rassweiler\\Documents\\Publishing\\Ch1_Microsatellites RRB Acropora\\Figures\\fig2\\msats_fig2b_wider.tiff",
+             x=0.26, y=0.02, height=0.9)+
   draw_plot_label(label= c("A","B"), 
                   size=panel.txt.sz,
-                  x= c(0.075, 0.075), 
-                  y = c(1, 0.525))+
-  draw_label("Number of MLGs", x = 0.25, y = 0.02, vjust = 0, size = axis.title.sz) +
+                  x= c(0.06, 0.54), 
+                  y = c(0.99, 0.99))+
+  draw_label("Number of MLGs", x = 0.5, y = 0.02, vjust = 0, size = axis.title.sz) +
   draw_label("Average number of alleles", x = 0.02, y = 0.55, vjust = 0.5, angle = 90, size = axis.title.sz)
 
 
-ggsave("C:\\Users\\rassweiler\\Documents\\Publishing\\Ch1_Microsatellites RRB Acropora\\Figures\\fig2\\msats_fig2.tiff", fig2, dpi=600, units="cm", width = 17, height = 17)
-
+#ggsave("C:\\Users\\rassweiler\\Documents\\Publishing\\Ch1_Microsatellites RRB Acropora\\Figures\\fig2\\msats_fig2.tiff", fig2, dpi=600, units="cm", width = 17, height = 17)
+ggsave("C:\\Users\\rassweiler\\Documents\\Publishing\\Ch1_Microsatellites RRB Acropora\\Figures\\fig2\\fig2_260915_PeerJ_revision1.png", fig2, dpi=600, units="cm", width = 16, height = 6, bg = "white")
 
 
 
@@ -1446,8 +1511,8 @@ diag(Source_AP_sf) <- NA                                        # Set diagonal t
 
 # Reduce dataset to nearest neighbors
 ap_nn <- apply(Source_AP_sf, 1, FUN = min, na.rm = T)           # Find the minimum distance to each site (so, neaerest neighbor)
-ap_nn_df <- as.data.frame(ap_nn)              # Convert list to data frame
-ap_nn_df <- data.frame(                                     # Add back in meta data of each genotype
+ap_nn_df <- as.data.frame(ap_nn)                                # Convert list to data frame
+ap_nn_df <- data.frame(                                         # Add back in meta data of each genotype
   Genotype = Source_AP$Genotype,
   NearestNeighborDistance = ap_nn
 ) %>%
@@ -1459,6 +1524,25 @@ sum(ap_nn_df$NearestNeighborDistance>300)/35                    # Percent of lin
 sum(ap_nn_df$NearestNeighborDistance<300)                       # Number of lineages with nearest neighbor <300m away: 13
 sum(ap_nn_df$NearestNeighborDistance<300)/35                    # Percent of lineages with nearest neighbor <300m away: 37.1%
 
+# minimum distances between sub-populations and maximum distances among individuals within sub-populations
+ap_pop_pairs <- Source_AP_meta$Pop[match(Source_AP$Genotype, Source_AP_meta$Genotype)]
+dimnames(Source_AP_sf) <- list(ap_pop_pairs, ap_pop_pairs)
+
+ap_pop_min_dist <- as.data.frame(as.table(Source_AP_sf)) %>%    # Convert 35x35 matrix into dataframe (35x35 = 1225 rows) 
+  filter(!is.na(Freq)) %>%                                      # Remove NAs (the 35 values from diagonal for distance to self set to NA)
+  group_by(Var1, Var2) %>%                                      # For each population pair combination...
+  summarize(MinDist = min(Freq), .groups = "drop") %>%          # Pull the minimum value between individuals (this is the closest each population is to one another, eg northern most Klein and southern most North)
+  filter(Var1 != Var2)                                          # Remove within-pop distances (eg South-South pair)
+
+min(ap_pop_min_dist$MinDist)                                    # All sub-populations were at least this far apart from one another. Double-check pop pair in pop_min_dist and in Google Earth Pro
+
+ap_pop_max_dist <- as.data.frame(as.table(Source_AP_sf)) %>%    # Convert 35x35 matrix into dataframe (35x35 = 1225 rows) 
+  filter(!is.na(Freq)) %>%                                      # Remove NAs (the 35 values from diagonal for distance to self set to NA)
+  group_by(Var1, Var2) %>%                                      # For each population pair combination...
+  summarize(MaxDist = max(Freq), .groups = "drop") %>%          # Pull the maximum value between individuals (this is the maximum distance among individuals within the same sub-population)
+  filter(Var1 == Var2)                                          # Only retain within-pop distances (eg South-South pair)
+
+max(ap_pop_max_dist$MaxDist)                                    # Maximum distance among individuals within same sub-populaiton (South because it has longest spread along coast)
 
 
 
@@ -1496,6 +1580,25 @@ ac_nn_df <- data.frame(                                         # Add back in me
 # Some basic calcs
 (sum(ac_nn_df$NearestNeighborDistance>300)/24)*100              # Percent of lineages with nearest neighbor >300m away: 100%
 
+# minimum distances between sub-populations and maximum distances among individuals within sub-populations
+ac_pop_pairs <- Source_AC_meta$Pop[match(Source_AC$Genotype, Source_AC_meta$Genotype)]
+dimnames(Source_AC_sf) <- list(ac_pop_pairs, ac_pop_pairs)
+
+ac_pop_min_dist <- as.data.frame(as.table(Source_AC_sf)) %>%    # Convert 24x24 matrix into dataframe (24x24 = 576 rows) 
+  filter(!is.na(Freq)) %>%                                      # Remove NAs (the 24 values from diagonal for distance to self set to NA)
+  group_by(Var1, Var2) %>%                                      # For each population pair combination...
+  summarize(MinDist = min(Freq), .groups = "drop") %>%          # Pull the minimum value between individuals (this is the closest each population is to one another, eg northern most Klein and southern most North)
+  filter(Var1 != Var2)                                          # Remove within-pop distances (eg South-South pair)
+
+min(ac_pop_min_dist$MinDist)                                    # All sub-populations were at least this far apart from one another.  Double-check pop pair in pop_min_dist and in Google Earth Pro
+
+ac_pop_max_dist <- as.data.frame(as.table(Source_AC_sf)) %>%    # Convert 24x24 matrix into dataframe (24x24 = 576 rows) 
+  filter(!is.na(Freq)) %>%                                      # Remove NAs (the 24 values from diagonal for distance to self set to NA)
+  group_by(Var1, Var2) %>%                                      # For each population pair combination...
+  summarize(MaxDist = max(Freq), .groups = "drop") %>%          # Pull the maximum value between individuals (this is the maximum distance among individuals within the same sub-population)
+  filter(Var1 == Var2)                                          # Only retain within-pop distances (eg South-South pair)
+
+max(ac_pop_max_dist$MaxDist)                                    # Maximum distance among individuals within same sub-populaiton (South because it has longest spread along coast)
 
 
 ##### Histograms!
@@ -1797,8 +1900,8 @@ tmap_save(filename = "C:\\Users\\rassweiler\\Documents\\Publishing\\Ch1_Microsat
 
 
 ##### Set coral
-#set_coral <- Apal_g1_f1
-set_coral <- Acer_g2_f1
+set_coral <- Apal_g1_f1
+#set_coral <- Acer_g2_f1
 #set_coral <- sens_test
 
 ##### Check missing data first
@@ -1852,14 +1955,14 @@ options(max.print = 1000)
 # A sharp decrease in the eigenvalues is usually indicative of the boundaries between relevant structures and random noise." - Jombart 2016 Introduction...
 
 # Final runs
-#pca.apal <- dudi.pca(df = impute_coral, center = TRUE, scale = FALSE, scannf = FALSE, nf = 4) # 4 PCs retained for Apal
+pca.apal <- dudi.pca(df = impute_coral, center = TRUE, scale = FALSE, scannf = FALSE, nf = 4) # 4 PCs retained for Apal
 pca.acer <- dudi.pca(df = impute_coral, center = TRUE, scale = FALSE, scannf = FALSE, nf = 4)  # 4 PCs retained for Acer
 
 # Exploratory plotting 
 
 # Apal
-#s.label(pca.apal$li) # with geno labels
-#s.class(pca.apal$li, fac=pop(impute_coral), col=funky(15)) # with population labels
+s.label(pca.apal$li) # with geno labels
+s.class(pca.apal$li, fac=pop(impute_coral), col=funky(15)) # with population labels
 
 # Acer
 # s.label(pca.acer$li) # with geno labels
@@ -1871,8 +1974,8 @@ pca.acer <- dudi.pca(df = impute_coral, center = TRUE, scale = FALSE, scannf = F
 ##### Set up for plotting PCA from ade4 via ggplot
 
 # Turn scores from PCA into dataframe
-#scores_df <- as.data.frame(pca.apal$li)
-scores_df <- as.data.frame(pca.acer$li)
+scores_df <- as.data.frame(pca.apal$li)
+#scores_df <- as.data.frame(pca.acer$li)
 
 # Add metadata to scores
 scores_df$ind <- rownames(scores_df)
@@ -1888,24 +1991,28 @@ hull_df <- scores_df %>%
   slice(chull(Axis1, Axis2))
 
 # Pull PC1 and PC2 values - Apal
-# eig <- pca.apal$eig                       # eigenvalues
-# var_exp <- round(100 * eig / sum(eig), 1) # % variance explained
-# pc1_pct <- var_exp[1]                     # PC1 percentage
-# pc2_pct <- var_exp[2]                     # PC2 percentage
-
-# Pull PC1 and PC2 values - Acer
-eig <- pca.acer$eig                       # eigenvalues
+eig <- pca.apal$eig                       # eigenvalues
 var_exp <- round(100 * eig / sum(eig), 1) # % variance explained
 pc1_pct <- var_exp[1]                     # PC1 percentage
 pc2_pct <- var_exp[2]                     # PC2 percentage
 
-# Apal settings
-set_title <- expression(italic("Acropora palmata"))
-set.legpos <- "none"
+# Pull PC1 and PC2 values - Acer
+# eig <- pca.acer$eig                       # eigenvalues
+# var_exp <- round(100 * eig / sum(eig), 1) # % variance explained
+# pc1_pct <- var_exp[1]                     # PC1 percentage
+# pc2_pct <- var_exp[2]                     # PC2 percentage
 
-# Acer settings
-set_title <- expression(italic("Acropora cervicornis"))
-set.legpos <- "none"
+# Apal title and sample size annotation
+set_title <- expression(italic("Acropora palmata"))
+set_coral_annot <- 'N = 34 MLGs'
+annot_x <- -1.4
+annot_y <- -2.2
+
+# Acer title and sample size annotation
+# set_title <- expression(italic("Acropora cervicornis"))
+# set_coral_annot <- 'N = 25 MLGs'
+# annot_x <- -1.1
+# annot_y <- -2.2
 
 
 
@@ -1913,18 +2020,20 @@ set.legpos <- "none"
 ##### Plot ade4 PCA with ggplot
 
 # Plot using ggplot
-#apal_pca <-
-acer_pca <-
+apal_pca <-
+#acer_pca <-
 ggplot(scores_df, aes(x = Axis1, y = Axis2, color = pop)) +
   geom_hline(yintercept=0, linetype="dashed", color = "gray")+
   geom_vline(xintercept=0, linetype="dashed", color = "gray")+
-  geom_point(size = point.sz) +
+  ylim(-2.4, 2.8)+
+  geom_point(size = point.sz, show.legend = F) +
   scale_colour_manual(values = pop.colors,
                       breaks = pop.order)+
   scale_fill_manual(values = pop.colors,
                     breaks = pop.order)+
   geom_polygon(data = hull_df,
                aes(x = Axis1, y = Axis2, group = pop, fill = pop, color = pop),
+               linewidth = 0.35,
                alpha = 0.25,
                inherit.aes = FALSE) +
   theme_classic()+
@@ -1932,24 +2041,29 @@ ggplot(scores_df, aes(x = Axis1, y = Axis2, color = pop)) +
   labs(
     x = paste0("PC1 (", pc1_pct, "%)"),
     y = paste0("PC2 (", pc2_pct, "%)")) +
-  theme(axis.title.x = element_text(color="black", size = axis.title.sz), 
-        axis.title.y=element_text(color="black", size = axis.title.sz),
+  theme(axis.title.x = element_text(color="black", size = axis.title.sz-1), 
+        axis.title.y=element_text(color="black", size = axis.title.sz-1),
         axis.text.x = element_text(color="black", size = axis.txt.sz), 
         axis.text.y = element_text(color="black", size = axis.txt.sz),
         legend.title = element_blank(),
         legend.text = element_text(size = leg.txt.sz),
         plot.title = element_text(size = title.sz, hjust = 0.5),
         legend.position = "none",
-        legend.key.size = unit(0.3, "cm"))
+        legend.key.size = unit(0.4, "cm"),
+        legend.key.spacing.y = unit(0.25, "cm"))+
+  annotate("text", x= annot_x, y=annot_y, 
+           label = paste0("italic('", set_coral_annot, "')"),
+           parse =TRUE,
+           size = annotate.sz)
 
 
 
-# Extract the legend fro apal_pca
+# Extract the legend from apal_pca
 legend <- get_legend(
   apal_pca + 
     guides(color = guide_legend(override.aes = list(shape = 15)),
            fill = guide_legend(override.aes = list(shape = 15))) +
-    theme(legend.position = "bottom")         # position at bottom
+    theme(legend.position = "right")         # position at bottom
 )
 
 
@@ -1957,8 +2071,8 @@ legend <- get_legend(
 combined_plots <- plot_grid(
   apal_pca,
   acer_pca,
-  ncol = 1,
-  align = "v",
+  ncol = 2,
+  align = "h",
   labels = c("A", "B"),  # optional labels
   label_size = 13,
   rel_heights = c(1, 1)
@@ -1969,13 +2083,14 @@ combined_plots <- plot_grid(
 fig3 <- plot_grid(
   combined_plots,
   legend,
-  ncol = 1,
-  rel_heights = c(1, 0.1)  # legend takes 10% of height
+  ncol = 2,
+  rel_heights = c(1, 1),
+  rel_widths = c(0.85, 0.15)
 )
 
 
 # Save!
-ggsave("C:\\Users\\rassweiler\\Documents\\Publishing\\Ch1_Microsatellites RRB Acropora\\Figures\\msats_fig3.tiff", fig3, dpi=600, units="cm", width = 8.5, height = 17)
+ggsave("C:\\Users\\rassweiler\\Documents\\Publishing\\Ch1_Microsatellites RRB Acropora\\Figures\\fig3\\msats_fig3_PeerJ_revision1.png", fig3, dpi=600, units="cm", width = 16, height = 6, bg = "white")
 
 
 
@@ -1993,12 +2108,12 @@ ggsave("C:\\Users\\rassweiler\\Documents\\Publishing\\Ch1_Microsatellites RRB Ac
 
 # Set coral
 set_coral <- Apal_g1_f1   
-#set_coral <- Acer_g2_f1  
+set_coral <- Acer_g2_f1  
 #set_coral <- sens_test
 
 
 # Set max number clusters depending on data set (must be 1 less than the totla number of individuals)
-max_clusters <- length(indNames(set_coral)) - 1    # 33 for Apal, 22 for Acer
+max_clusters <- (length(indNames(set_coral)) - 1)/2    # 33 for Apal, 22 for Acer
 
 
 ##### Use find.clusters() to identify clusters
@@ -2029,9 +2144,9 @@ grp <- find.clusters(set_coral)
 ##### set coral species settings
 
 # Acropora palmata - 11 loci
-# lab_order <- c("North", "Central", "South", "Klein", "LacBay")  
-# set_coral_fst <- Apal_g1_f1
-# set_name_sp <- "AP.csv"
+lab_order <- c("North", "Central", "South", "Klein", "LacBay")
+set_coral_fst <- Apal_g1_f1
+set_name_sp <- "AP.csv"
 
 # Acropora palmata - 6 loci (reduced to same 6 loci in Acer for comparability)
 # lab_order <- c("North", "Central", "South", "Klein", "LacBay")  
@@ -2039,9 +2154,9 @@ grp <- find.clusters(set_coral)
 # set_name_sp <- "AP6.csv"
 
 # Acropora cervicornis - excluding Lac Bay from Acer sub-pop analyses
-lab_order <- c("North", "Central", "South", "Klein")             
-set_coral_fst <- Acer_g2_f1
-set_name_sp <- "AC.csv"
+# lab_order <- c("North", "Central", "South", "Klein")             
+# set_coral_fst <- Acer_g2_f1
+# set_name_sp <- "AC.csv"
 
 # Sensitivity test for removing certain loci
 #set_coral_fst <- sens_test
@@ -2159,7 +2274,7 @@ ggplot(data = fst.df, aes(x = Site1, y = Site2, fill = Fst))+
 
 ##### Set coral and label order
 # set coral
-#set_coral_boot <- Apal_g1_f1
+set_coral_boot <- Apal_g1_f1
 #set_coral_boot <- Apal_g1_f3
 #set_coral_boot <- Acer_g2_f1
 #set_coral_boot <- sens_test
@@ -2368,7 +2483,7 @@ mantel_vecs <- cbind(genedist_vec, physdist_vec)
 apal_mantel <-
 #acer_mantel <- 
   ggplot(data = mantel_vecs, aes(x = physdist_vec, y = genedist_vec))+
-  geom_point(size = point.sz-1, color = "black")+
+  geom_point(size = point.sz, color = "black")+
   scale_y_continuous(limits = c(0.15, 0.75), breaks = seq(0.2, 0.8, by = 0.1))+   # Apal range 0.19-0.65; Acer range: 0.17-0.73
   #scale_x_continuous(limits = c(0, 45), breaks = seq(0, 45, by = 10))+           # Apal range 0-44;      Acer range: 0.3-30m
   theme_classic()+
