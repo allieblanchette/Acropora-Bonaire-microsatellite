@@ -1,8 +1,8 @@
 ########################################################################################################################################################################################################################################################################################################################################################################
 # MICROSATELLITE ALLELE DATA ANALYSES
-# Purpose: analyzing (pre-cleaned/pre-wrangled) microsatellite data of Acropora cervicornis and Acropora palmata from Reef Renewal Bonaire's gene bank
+# Purpose: Analyzing (pre-cleaned) microsatellite data of Acropora cervicornis and Acropora palmata from Reef Renewal Bonaire's gene bank
 # Data: Cleaned Acropora palmata and Acropora cervicornis microsatellite allele tables from Reef Renewal Bonaire's gene bank
-# Last updated on: 2026 September 18
+# Last updated on: 2026 September 22
 # Last updated by: Allie Blanchette
 # NOTE - often in this script, each analysis is written out once, and you change whether you are analyzing the A. palmata or A. cervicornis data using "set_coral <- " at the beginning of the analysis
 ########################################################################################################################################################################################################################################################################################################################################################################
@@ -324,13 +324,16 @@ regln.sz = 0.75
 ## DMSO vs. DNA Shield comparison
 ####################################################################################################################################################################################
 
-# Load in and clean qubit data for DNA concentrations, selecting for just the relevant data columns
+##### Load in and clean qubit data for DNA concentrations, selecting for just the relevant data columns
+
+# DNA concentrations measured by M.E.
 dna_concentrations_ME <- read_csv("C:\\Users\\rassweiler\\Documents\\PhD Research!\\Bonaire\\Genetics collections and lab work\\Protocols\\Protocol data\\3_Qubit_Data_ME.csv") %>% 
-  janitor::clean_names() %>%   # clean up column names
+  janitor::clean_names() %>%                                                               # clean up column names
   select(initials:replicate, concentration_1, concentration_2, sample_comments) %>%        # reduce data frame to just columns needed. Each sample was measured twice in a row. qubit_x_ng_ml data were the dilution concentrations of sample in fluorometer; concentration_x were the calculated concentration of original sample
   mutate(species = recode(species, "AC" = "Acer"),
          species = recode(species, "AP" = "Apal"))
 
+# DNA concentrations measured by A.B.
 dna_concentrations_AB <- read_csv("C:\\Users\\rassweiler\\Documents\\PhD Research!\\Bonaire\\Genetics collections and lab work\\Protocols\\Protocol data\\3_Qubit_Data_AB.csv") %>% 
   janitor::clean_names() %>% 
   rename(sample_comments = individual_comments,
@@ -339,7 +342,10 @@ dna_concentrations_AB <- read_csv("C:\\Users\\rassweiler\\Documents\\PhD Researc
   select(initials, date, sample_id, species, concentration_1, concentration_2, sample_comments)
 
 
-# Calculate summary stats for A. cervicornis in DMSO in initial 2022 sampling
+
+##### Calculate summary stats for A. cervicornis in DMSO in initial 2022 sampling
+
+# Create one merged DNA concentrations data frame for initial 2022 sampling
 dna_concentrations_2022 <- dna_concentrations_AB %>% 
   filter(species == "Acer") %>% 
   mutate(concentration_1 = as.numeric(concentration_1),                                    # make concentration data numeric
@@ -347,15 +353,19 @@ dna_concentrations_2022 <- dna_concentrations_AB %>%
          concentration_1 = ifelse(is.na(concentration_1), 0, concentration_1),             # make NAs = 0 (cases where DNA was too low for qubit to read, ie 'Out of Range')
          concentration_2 = ifelse(is.na(concentration_2), 0, concentration_2),             # make NAs = 0 (cases where DNA was too low for qubit to read, ie 'Out of Range')
          concentration_mean_reading = (concentration_1 + concentration_2)/2) %>%           # and calculate average across 2 readings (note that AC_G04_BN_DM1 and AC_G05_BN_DM1 were too low/out of range)
-  filter(!(stringr::str_detect(sample_id, "E1|Zymo|Speedvac|SH|ST|LH|R2")))                # filter out any trial-type samples (trialing dna extraction methods)
+  filter(!(stringr::str_detect(sample_id, "E1|Zymo|Speedvac|SH|ST|LH|R2")))                # filter out any trial-type samples from when we were trialing dna extraction methods
 
+# Calculate summary stats
 median(dna_concentrations_2022$concentration_mean_reading)
 mean(dna_concentrations_2022$concentration_mean_reading)
 min(dna_concentrations_2022$concentration_mean_reading)
 max(dna_concentrations_2022$concentration_mean_reading)
 
 
-# Calculate summary stats for identical samples (species-geno-tree all same) tested in each preservative in 2024 re-sampling
+
+##### Calculate summary stats for identical samples (species-geno-tree all same) tested in each preservative in 2024 re-sampling
+
+# Create one merged DNA concentrations data frame for initial 2024 re-sampling
 preservative_comparison_full <- dna_concentrations_ME %>% 
   filter(species == "Acer") %>%                                                            # only comparing DM/DS performance for Acropora cervicornis
   filter(preservative %in% c("DM", "DS")) %>%                                              # reduce to just the samples that were intentionally used for comparison of preservative types
@@ -371,7 +381,8 @@ preservative_comparison_full <- dna_concentrations_ME %>%
   filter(n() > 1) %>%                                                                      # remove any samples that did not have a matching partner for both preservative types (eg occurs only once in either DMSO or DNA Shield)
   ungroup()
 
-preservative_comparison_summary <- preservative_comparison_full %>%   # calculate averages for each species_geno_tree per preservative (eg sometimes 3 replicates per species_geno_tree were run, all from DNA Shield)
+# Calculate summary stats
+preservative_comparison_summary <- preservative_comparison_full %>%                        # calculate averages for each species_geno_tree per preservative (eg sometimes 3 replicates per species_geno_tree were run, all from DNA Shield)
   group_by(preservative) %>% 
   summarise(concentration_median = median(concentration_mean_sample),
             concentration_mean = mean(concentration_mean_sample),                          # for the samples that were extracted from both preservative types, calculate mean DNA concentration and standard error for variation
@@ -379,7 +390,7 @@ preservative_comparison_summary <- preservative_comparison_full %>%   # calculat
             n = length(concentration_mean_sample)) %>% 
   mutate(se = sd/sqrt(n))
 
-# Export preservative_comparison_full for supplement
+# Export for Supplement (Table S1)
 write.csv(preservative_comparison_full, "C:\\Users\\rassweiler\\Documents\\Publishing\\Ch1_Microsatellites RRB Acropora\\Supplement\\preservative_comparison_full.csv", row.names = F)
   
 
